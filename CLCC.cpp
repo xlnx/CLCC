@@ -81,6 +81,10 @@ stringstream out("");
 
 int eoffset, lblcount, glbcount = 1;
 
+stack<int> lblbreak, lblcontinue;
+
+bool set_offset;
+
 inline void warning(const string& str)
 {
 	std::cerr << str << std::endl;
@@ -118,18 +122,18 @@ inline void to_fn(const rtype& data)
 
 reflected_lexer<ast_type> lex(
 	"+"_t, "-"_t, "~"_t,
-	"*"_t, "/"_t, "%%"_t,
+	"*"_t, "/"_t, "%"_t,
     "<"_t, ">"_t,
 	"<<"_t, ">>"_t,
 	"<="_t, ">="_t, 
-	"=="_t, "!="_t,
 	"&"_t, "|"_t, "^"_t, "?"_t, ":"_t, 
 	"&&"_t, "||"_t, 
 	","_t, ";"_t,
-	"="_t, "+="_t, "-="_t, "*="_t, "/="_t, "&="_t, "|="_t,
+	"="_t, "+="_t, "-="_t, "*="_t, "/="_t, "&="_t, "|="_t, "%="_t
 	"^="_t, "<<="_t, ">>="_t,
 	"("_t, ")"_t, "["_t, "]"_t, "{"_t, "}"_t,
-	"!"_t, "~"_t, "++"_t, "--"_t, "sizeof"_t,
+	"!"_t, "++"_t, "--"_t, "sizeof"_t,
+	"=="_t, "!="_t,
 	"integer"_t = "(0[xX][0-9a-fA-F]+)|([1-9]\\d*)|(0[0-7]*)"_r
 		>> lexer_reflect<ast_type>([](const string& src)->rtype{
 			size_t idx; long long result = stoll(src, &idx, 0);
@@ -138,14 +142,14 @@ reflected_lexer<ast_type> lex(
 			}
 			return short(result);
 		}),
-	"char"_t = "\\'("
+	"chliteral"_t = "\\'("
                 "(\\\\("
                     "([0-7]+)"
                     "|([xX][0-9A-Fa-f]+)"
                     "|([\\\\abfnrtv\\\'\\\"\\?])"
                 "))"
             "|([^\\n\\\\]))*\\'"_r
-	    >> lexer_reflect<ast_type>([](const string& src)->rtype{
+	    >> lexer_reflect<ast_type>([](const string& src)->rtype{	
 	    	short result = 0, mby = 0;
 	    	for (auto i = 1; i < src.length() - 1; ++i) {
 	    		if (mby >= 2) {
@@ -209,9 +213,9 @@ reflected_lexer<ast_type> lex(
         }),
 	"var"_t, "fn"_t,
 	"break"_t, "else"_t, "switch"_t, "case"_t, "enum"_t, "register"_t,
-	"typedef"_t, "char"_t, "return"_t, "union"_t, "const"_t, "continue"_t,
-	"for"_t, "void"_t, "default"_t, "goto"_t, "sizeof"_t, "do"_t,
-	"if"_t, "while"_t
+	"return"_t, "union"_t, "const"_t, "continue"_t,
+	"for"_t, "default"_t, "goto"_t, "sizeof"_t, "do"_t,
+	"if"_t, "while"_t, "print"_t, "scan"_t
 );
 
 parser<ast_type> cparser( lex, 
@@ -290,6 +294,19 @@ parser<ast_type> cparser( lex,
                 }
                 min_offset = min(offset, min_offset);
                 Qfnlbl = "Q" + fn;
+                auto tmp = offset;
+                set_offset = true;
+                ast[1].gen();
+                set_offset = false;
+                offset = tmp;
+                fnlist[fn] = fndata("?", fncount++, -min_offset, vec.size());
+                while (!lblbreak.empty())
+                    lblbreak.pop();
+                while (!lblcontinue.empty())
+                    lblcontinue.pop();
+                if (out.str() != "")
+                    throw std::logic_error("Compiler has reported a bug!");
+                out.str("");
                 if (fn == "main") {
                 	out <<  "           LD          R4, #3\n"\
                             "           LD          R5, #3\n"\
@@ -303,75 +320,121 @@ parser<ast_type> cparser( lex,
                     out <<  "           AND         R0, R0, #0\n"\
                             "Qmain      TRAP        x25\n";
                 } else {
-                	string temp = out.str(), tmp0;
-                	out.str("");
-                        ast[1].gen();
-                        tmp0 = out.str();
-                    out.str(temp);
                     out <<  "           LDR         R1, R4, #0\n"\
                             "           ADD         R1, R4, R1\n"\
                             "           STR         R1, R4, #" << -min_offset << "\n"\
 	                        "           STR         R7, R4, #" << -min_offset - 1 << "\n"\
-	                        "           ADD         R4, R4, #" << -min_offset << "\n"
-                            << tmp0 <<
-                            "           AND         R0, R0, #0\n"\
+	                        "           ADD         R4, R4, #" << -min_offset << "\n";
+                    ast[1].gen();
+                    out <<  "           AND         R0, R0, #0\n"\
                             "Q" << fn << "         LDR         R7, R4, #-1\n"\
 	                        "           LDR         R4, R4, #0\n"\
 	                        "           RET\n";
                 }
-                fnlist[fn] = fndata(out.str(), fncount++, -min_offset, vec.size());
+                fnlist[fn] = fndata(out.str(), fnlist[fn].second, fnlist[fn].offset, fnlist[fn].param);
                 out.str(global);
             ),
     "If"_p = 
         "if"_t + "("_t + "Expr"_p + ")"_t + "Stmt"_p
             >> parser_do(
-                to_rvalue(ast[0].gen());
-                int n = lblcount;
-                lblcount += 1;
-                out <<  read_previous(R0) <<
-                        "           BRz         LBL" << n << "\n";
-                ast[1].gen();
-                out <<  "LBL" << n << "\n";
+                if (!set_offset) {
+	                to_rvalue(ast[0].gen());
+	                int n = lblcount;
+	                lblcount += 1;
+	                out <<  read_previous(R0) <<
+	                        "           BRz         LBL" << n << "\n";
+	                ast[1].gen();
+	                out <<  "LBL" << n << "\n";
+                } else {
+                	ast[1].gen();
+                }
             )
         |"if"_t + "("_t + "Expr"_p + ")"_t + "Stmt"_p + "else"_t + "Stmt"_p
             >> parser_do(
-                to_rvalue(ast[0].gen());
-                int n = lblcount;
-                lblcount += 2;
-                out <<  read_previous(R0) <<
-                        "           BRz         LBL" << n << "\n";
-                ast[1].gen();
-                out <<  "           BR          LBL" << (n + 1) << "\n" <<
-                        "LBL" << n << "\n";
-                ast[2].gen();
-                out <<  "LBL" << (n + 1) << "\n";
+                if (!set_offset) {
+	                to_rvalue(ast[0].gen());
+	                int n = lblcount;
+	                lblcount += 2;
+	                out <<  read_previous(R0) <<
+	                        "           BRz         LBL" << n << "\n";
+	                ast[1].gen();
+	                out <<  "           BR          LBL" << (n + 1) << "\n" <<
+	                        "LBL" << n << "\n";
+	                ast[2].gen();
+	                out <<  "LBL" << (n + 1) << "\n";
+                } else {
+                	ast[1].gen(); ast[2].gen();
+                }
             ),
-    "While"_p = 
+    "Loop"_p = 
         "while"_t + "("_t + "Expr"_p + ")"_t + "Stmt"_p
             >> parser_do(
-                to_rvalue(ast[0].gen());
-                int n = lblcount;
-                lblcount += 1;
-                out <<  read_previous(R0) <<
-                        "           BRz         LBL" << n << "\n";
-                ast[1].gen();
-                out <<  "LBL" << n << "\n";
-            ),
-    "Return"_p = 
-        "return"_t + "Expr"_p + ";"_t
-            >> parser_do(
-                eoffset = 1;
-                to_rvalue(ast[0].gen());
-                out <<  read_previous(R0) <<
-                        "           BR          " << Qfnlbl << "\n";
+                if (!set_offset) {
+	                int n = lblcount;   
+	                lblcount += 2;
+	                lblcontinue.push(n + 1);
+	                lblbreak.push(n);
+	                out <<  "LBL" << (n + 1) << "\n";
+	                to_rvalue(ast[0].gen());
+	                out <<  read_previous(R0) <<
+	                        "           BRz         LBL" << n << "\n";
+	                ast[1].gen();
+	                out <<  "           BR          LBL" << (n + 1) << "\n"\
+                            "LBL" << n << "\n";
+                    lblcontinue.pop();
+                    lblbreak.pop();
+                } else {
+                 	ast[1].gen();
+                }
             )
-        |"return"_t + ";"_t
+        |"do"_t + "Stmt"_p + "while"_t + "("_t + "Expr"_p + ")"_t + ";"_t
             >> parser_do(
-                out <<  "           AND         R0, R0, #0\n"\
-                        "           BR          " << Qfnlbl << "\n";
+                if (!set_offset) {
+	                int n = lblcount;   
+	                lblcount += 2;
+	                lblcontinue.push(n);
+	                lblbreak.push(n + 1);
+                    out <<  "LBL" << n << "\n";
+	                ast[0].gen();
+                    to_rvalue(ast[1].gen());
+	                out <<  read_previous(R0) <<
+	                        "           BRnp        LBL" << n << "\n";
+                    out <<  "LBL" << (n + 1) << "\n";
+                    lblcontinue.pop();
+                    lblbreak.pop();
+                } else {
+                 	ast[0].gen();
+                }
+            )
+        |"for"_t + "("_t + "FStmt"_p + "Expr"_p + ";"_t + "Expr"_p + ")"_t + "Stmt"_p
+            >> parser_do(
+                int off = offset;
+                local.push_back(map<string, int>());
+                if (!set_offset) {
+                	int n = lblcount;   
+	                lblcount += 2;
+	                lblcontinue.push(n + 1);
+	                lblbreak.push(n);
+                    ast[0].gen();
+	                out <<  "LBL" << (n + 1) << "\n";
+	                to_rvalue(ast[1].gen());
+	                out <<  read_previous(R0) <<
+	                        "           BRz         LBL" << n << "\n";
+	                ast[2].gen();
+                    ast[3].gen();
+	                out <<  "           BR          LBL" << (n + 1) << "\n"\
+                            "LBL" << n << "\n";
+                    lblcontinue.pop();
+                    lblbreak.pop();
+                } else {
+                	ast[0].gen();
+                	ast[3].gen();
+                }
+                offset = off;
+                local.pop_back();
             ),
     "Var"_p = 
-        "var"_t + "id"_t + "VarR"_p + ";"_t
+        "var"_t + "id"_t + "VarR"_p
             >> parser_do(
                 string name = ast.term(1).get<string>();
                 if (local.back()[name] == 0)
@@ -380,16 +443,18 @@ parser<ast_type> cparser( lex,
                     throw std::logic_error("multiple defination.");
                 ast[0].gen();
             )
-        |"var"_t + "id"_t + "="_t + "expr"_p + "VarR"_p + ";"_t
+        |"var"_t + "id"_t + "="_t + "expr"_p + "VarR"_p
             >> parser_do(
                 string name = ast.term(1).get<string>();
                 if (local.back()[name] == 0)
                     local.back()[name] = offset--, min_offset = min(offset, min_offset);
                 else
                     throw std::logic_error("multiple defination.");
-                to_rvalue(ast[0].gen());
-                out <<  read_previous(R1) <<
+                if (!set_offset) {
+                    to_rvalue(ast[0].gen());
+                    out <<  read_previous(R1) <<
                         "           STR         R1, R4, #" << offset + 1 << "\n";
+                }
                 ast[1].gen();
             )
         |""_t
@@ -409,6 +474,7 @@ parser<ast_type> cparser( lex,
     "Block"_p =
         "{"_t + "Stmts"_p + "}"_t
             >> parser_do(
+                eoffset = 1;
                 int off = offset;
                 local.push_back(map<string, int>());
                 ast[0].gen();
@@ -420,21 +486,85 @@ parser<ast_type> cparser( lex,
             >> parser_expand()
         |""_t
             >> parser_do(),
+    "FStmt"_p = 
+        "Expr"_p + ";"_t
+            >> parser_do(
+                if (!set_offset) {
+                    eoffset = 1;
+                    return ast[0].gen();
+                }
+            )
+        |"Var"_p + ";"_t
+            >> parser_passon(),
+    "Control"_p = 
+        "break"_t
+            >> parser_do(
+                if (lblbreak.empty())
+                    throw std::logic_error("cannot break because no loop.");
+                out << "            BR          LBL" << lblbreak.top() << "\n";
+            )
+        |"continue"_t
+            >> parser_do(
+                if (lblcontinue.empty())
+                    throw std::logic_error("cannot continue because no loop.");
+                out << "            BR          LBL" << lblcontinue.top() << "\n";
+            )
+        |"return"_t + "Expr"_p
+            >> parser_do(
+                eoffset = 1;
+                to_rvalue(ast[0].gen());
+                out <<  read_previous(R0) <<
+                        "           BR          " << Qfnlbl << "\n";
+            )
+        |"return"_t
+            >> parser_do(
+                out <<  "           AND         R0, R0, #0\n"\
+                        "           BR          " << Qfnlbl << "\n";
+            ),
+    "IO"_p = 
+        "scan"_t + "expr"_p
+            >> parser_do(
+                eoffset = 1;
+                to_lvalue(ast[0].gen());
+                out <<  read_previous(R1) <<
+                        "           TRAP        x23\n"\
+                        "           STR         R0, R1, #0\n";
+            )
+        |"print"_t + "Expr"_p
+            >> parser_do(
+                eoffset = 1;
+                to_rvalue(ast[0].gen());
+                out <<  read_previous(R0) <<
+                        "           TRAP        x21\n";
+            ),
     "Stmt"_p =
-        "Block"_p
+        "IO"_p + ";"_t
+            >> parser_do(
+                if (!set_offset) {
+                	return ast[0].gen();
+                }
+            )
+        |"Block"_p
             >> parser_passon()
         |"Expr"_p + ";"_t
             >> parser_do(
-                eoffset = 1;
-                return ast[0].gen();
+                if (!set_offset) {
+                    eoffset = 1;
+                    return ast[0].gen();
+                }
             )
-        |"Return"_p
-            >> parser_passon()
         |"If"_p
             >> parser_passon()
-        |"Var"_p
-            >> parser_passon(),
-            
+        |"Var"_p + ";"_t
+            >> parser_passon()
+        |"Loop"_p
+            >> parser_passon()
+        |"Control"_p + ";"_t
+            >> parser_do(
+                if (!set_offset) {
+                	return ast[0].gen();
+                }
+            ),
             
     "Expr"_p =
         "expr"_p + ","_t + "Expr"_p
@@ -790,7 +920,7 @@ parser<ast_type> cparser( lex,
                         "           LDR         R2, R1, #0\n"\
                         "           ADD         R2, R2, #1\n"
                         << write_current(R2) << "; ++a\n"\
-                        "           STR         R2, R1, #0 ; lexpr++\n";
+                        "           STR         R2, R1, #0 ; ++lexpr\n";
             )
         |"--"_t + "expr12"_p
             >> parser_do(
@@ -799,7 +929,7 @@ parser<ast_type> cparser( lex,
                         "           LDR         R2, R1, #0\n"\
                         "           ADD         R2, R2, #-1\n"
                         << write_current(R2) << "; --a\n"\
-                        "           STR         R2, R1, #0 ; lexpr--\n";
+                        "           STR         R2, R1, #0 ; --lexpr\n";
             )
         |"!"_t + "expr12"_p
             >> parser_do(
@@ -922,7 +1052,7 @@ parser<ast_type> cparser( lex,
                         << write_current(R1) << "; 16-bit literal\n";
                 return rvalue;
             )
-        |"char"_t
+        |"chliteral"_t
             >> parser_do(
                 short val = ast.term(0).get<short>();
                 out <<  "           AND         R1, R1, #0\n"\
@@ -936,24 +1066,40 @@ parser<ast_type> cparser( lex,
 
 int main(int argc, char *argv[])
 {
-	/*for (int i = 1; i != argc; ++i)
-	{
-		ifstream in;
-		in.open(argv[i]);
-
-		in.close();
-	}*/
 	string buffer, ln;
-	while (getline(cin, ln)) {
-		if (ln == "") break;
-		buffer += ln + '\n';
+	if (argc > 1)
+    {
+		for (int i = 1; i != argc; ++i)
+		{
+			ifstream in;
+			in.open(argv[1]);
+            while (getline(in, ln)) {
+            	buffer += ln;
+            }
+			in.close();
+		}
+	} else 
+    {
+		while (getline(cin, ln)) {
+			if (ln == "") break;
+			buffer += ln + '\n';
+		}
 	}
 	try {
     	cparser.parse(buffer.c_str());
 	} catch(parser_exception<reflected_lexer<ast_type>> e) {
     	cerr << e.what();
+    	return 1;
+    } catch(std::logic_error e) {
+    	cerr << e.what();
+    	return 1;
+    } catch(std::bad_cast e) {
+    	cerr << "invalid token.";
+    	return 1;
     }
-    ostream& output = cout;
+    
+    ostream& output = argc == 1 ? cout :
+        *new ofstream("out.asm");
     output << "           .ORIG       x3000\n";
     if (fnlist["main"].first == "")
     	throw std::logic_error("lack of main function.");
@@ -976,6 +1122,9 @@ int main(int argc, char *argv[])
     output <<       "           .BLKW       x30\n"\
                     "STACK      .BLKW       #1\n"\
                     "           .END\n";
-    
+    if (argc != 1) {
+    	static_cast<ofstream&>(output).close();
+        delete &output;
+    }
 //	cout << buffer;
 } 
