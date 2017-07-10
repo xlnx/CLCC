@@ -124,6 +124,40 @@ inline void to_fn(const rtype& data)
 #include "clcc_lexer.h"
 #include "clcc_parser.h"
 
+int stack_size = 0x1;
+int static_size = 0x20;
+int buffer_size = 0x301;
+
+string preprocessor(const string& str)
+{	
+	for (auto itr = &str[0]; *itr != 0; ++itr)
+	{
+    	if (*itr != ' ' && *itr != '\t' && *itr != '\r')
+    	{
+    		if (*itr == '#')
+    		{
+    			char tag[256];
+    			int size;
+            	if (sscanf(itr + 1, "%s%x", tag, &size) != 2) 
+                	throw std::logic_error("unknown preprocessor.");
+            	string s = tag;
+            	if (s == "stack") {
+                	stack_size = size;
+                } else if (s == "static") {
+                	static_size = size;
+                } else if (s == "buffer") {
+                	buffer_size = size;
+                } else {
+                	throw std::logic_error("unknown preprocessor.");
+                }
+            	return "";
+            }
+            break;
+        }
+    }
+    return str;
+}
+
 int main(int argc, char *argv[])
 {
 	string buffer, ln;
@@ -134,7 +168,7 @@ int main(int argc, char *argv[])
 			ifstream in;
 			in.open(argv[1]);
             while (getline(in, ln)) {
-            	buffer += ln;
+            	buffer += preprocessor(ln);
             }
 			in.close();
 		}
@@ -142,7 +176,7 @@ int main(int argc, char *argv[])
     {
 		while (getline(cin, ln)) {
 			if (ln == "") break;
-			buffer += ln + '\n';
+			buffer += preprocessor(ln);
 		}
 	}
 	try {
@@ -180,10 +214,11 @@ int main(int argc, char *argv[])
         if (s.second.first != "")
             output <<   "           .FILL       Fn" << s.first << endl;
     //output << global << endl;
-    output <<       "           .FILL       CPRINTI\n"
+    output <<       "           .FILL       CSCANS\n"
+                    "           .FILL       CPRINTI\n"
                     "           .FILL       CSCANI\n"
                     "           .FILL       CSCANC\n";
-    output <<       "STATIC     .BLKW       x20\n"
+    output <<       "STATIC     .BLKW       #" << static_size << "\n"
                     "           .BLKW       x30\n"
                     "STACK      .BLKW       #1\n"
                     "           .END\n";

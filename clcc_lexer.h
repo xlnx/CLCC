@@ -105,5 +105,5 @@ reflected_lexer<ast_type> lex(
 	"for"_t, "default"_t, "goto"_t, "sizeof"_t, "do"_t,
 	"if"_t, "while"_t, 
     "printd"_t, "printc"_t, "prints"_t, 
-    "scanc"_t, "scand"_t
+    "scanc"_t, "scand"_t, "scans"_t
 );

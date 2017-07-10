@@ -16,6 +16,9 @@
             if (local.back()[name] == 0) {
                 short size = ast.term(3).get<short>();
                 local.back()[name] = offset -= size - 1, min_offset = min(offset, min_offset);
+                out <<  "           AND         R0, R0, #0\n"
+                        "           ADD         R0, R4, #" << offset + 1 << "\n"
+                        "           STR         R0, R4, #" << offset << "\n";
                 offset--;
             } else
                 throw std::logic_error("multiple defination.");
@@ -52,7 +55,10 @@
             string name = ast.term(1).get<string>();
             if (local.back()[name] == 0) {
                 short size = ast.term(3).get<short>();
-                local.back()[name] = offset -= size - 1, min_offset = min(offset, min_offset);
+                local.back()[name] = offset -= size, min_offset = min(offset, min_offset);
+                out <<  "           AND         R0, R0, #0\n"
+                        "           ADD         R0, R4, #" << offset + 1 << "\n"
+                        "           STR         R0, R4, #" << offset << "\n";
                 offset--;
             } else
                 throw std::logic_error("multiple defination.");
@@ -186,6 +192,18 @@
         )
     |""_t
         >> parser_do(),
+"ScansR"_p = 
+    ","_t + "Expr"_p + "ScansR"_p
+        >> parser_do(
+            eoffset = 1;
+            to_rvalue(ast[0].gen());
+            out <<  read_previous(R0) <<
+                    "           LDR         R7, R6, #-4\n"\
+                    "           JSRR        R7\n";
+            ast[1].gen();
+        )
+    |""_t
+        >> parser_do(),
 "IO"_p = 
     "scanc"_t + "expr"_p + "ScancR"_p
         >> parser_do(
@@ -207,6 +225,15 @@
                     "           LDR         R7, R6, #-2\n"\
                     "           JSRR        R7\n"\
                     "           STR         R0, R1, #0\n";
+            ast[1].gen();
+        )
+    |"scans"_t + "Expr"_p + "ScansR"_p
+        >> parser_do(
+            eoffset = 1;
+            to_rvalue(ast[0].gen());
+            out <<  read_previous(R0) <<
+                    "           LDR         R7, R6, #-4\n"\
+                    "           JSRR        R7\n";
             ast[1].gen();
         )
     |"printc"_t + "Expr"_p + "PrintcR"_p

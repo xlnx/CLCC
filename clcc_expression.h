@@ -119,11 +119,11 @@
             out <<  read_previous(R0) <<
                     "           BRnp        LBL" << n << "\n"\
                     "           AND         R1, R1, #0\n"\
-                    "           ADD         R1, R1, #1\n"
                     << write_current(R1) << "; a || b\n"\
                     "           BR          LBL" << (n + 1) << "\n"\
                     "LBL" << n << "\n"\
                     "           AND         R1, R1, #0\n"
+                    "           ADD         R1, R1, #1\n"
                     << write_current(R1) << "; a || b\n"\
                     "LBL" << (n + 1) << "\n";
         )
@@ -374,6 +374,7 @@
                     "           ADD         R7, R7, #1\n"\
                     "LBL" << lblcount << "\n"
                     << write_current(R7) << "; !a\n";
+            lblcount++;
         )
     |"~"_t + "expr12"_p
         >> parser_do(
@@ -442,13 +443,13 @@
         )
     |"expr13"_p + "["_t + "Expr"_p + "]"_t
         >> parser_do(
-            to_lvalue(ast[0].gen());
+            to_rvalue(ast[0].gen());
             eoffset++;
             to_rvalue(ast[1].gen());
             out <<  read_previous(R2);
             eoffset--;
             out <<  read_previous(R1) <<
-                    "           ADD         R1, R1, R2"
+                    "           ADD         R1, R1, R2\n"\
                     << write_current(R1) << "; a[i]\n";
             return lvalue;
         )

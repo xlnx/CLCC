@@ -1,0 +1,15 @@
+	var pdata = 0x4000;
+	pdata[0] = 0x4100;
+	strcpy(pdata[1] = 0xD000, "520");
+	strcpy(pdata[2] = 0xD010, "Xiaohong");
+	strcpy(pdata[3] = 0xD020, "Jiang");
+    pdata = 0x4100;
+    pdata[0] = 0x4200;
+	strcpy(pdata[1] = 0xD100, "301");
+	strcpy(pdata[2] = 0xD110, "Shi");
+	strcpy(pdata[3] = 0xD120, "Cai");
+	pdata = 0x4200;
+    pdata[0] = 0x4300;
+	strcpy(pdata[1] = 0xD200, "512");
+	strcpy(pdata[2] = 0xD210, "Qingsong");
+	strcpy(pdata[3] = 0xD220, "Shi");
